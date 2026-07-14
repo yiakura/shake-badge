@@ -3,6 +3,7 @@ import { PHYSICS, defaultPhysicsTuning } from '../config/physics'
 import type { ImageShape, ImageShapeMode, OutlineMode, PhysicsTuning } from '../types/badge'
 import type { Vec2 } from '../utils/motionMath'
 import { clampMagnitude } from '../utils/motionMath'
+import { clamp } from '../utils/gestureMath'
 import { convexHull, opaqueSamplePoints, polygonCentroid, type Point } from '../utils/geometry'
 import { decodeImage, releaseDecoded } from './imageProcessing'
 
@@ -249,8 +250,15 @@ export class PhysicsController {
   private runner: Matter.Runner | null = null
   private bodies: Matter.Body[] = []
   private walls: Matter.Body[] = []
+  private mouseConstraint: Matter.MouseConstraint | null = null
   /** effective containment radius per body id */
   private radii = new Map<number, number>()
+  /** body id → image id (for pinch persistence + hit-testing) */
+  private bodyImageId = new Map<number, string>()
+  /** body id → scale applied since build, relative to its initial pinch size */
+  private bodyRelScale = new Map<number, number>()
+  /** body id → initial (built) diameter, for pinch clamp */
+  private bodyBaseDiameter = new Map<number, number>()
   private width = 0
   private height = 0
   private maxDiameter = 0
@@ -359,6 +367,9 @@ export class PhysicsController {
               })
       }
       this.radii.set(body.id, radius)
+      this.bodyImageId.set(body.id, sprite.id)
+      this.bodyRelScale.set(body.id, 1)
+      this.bodyBaseDiameter.set(body.id, diameter)
       return body
     })
 
@@ -373,10 +384,11 @@ export class PhysicsController {
     })
     Matter.Composite.add(engine.world, mouseConstraint)
     render.mouse = mouse
+    this.mouseConstraint = mouseConstraint
 
     const onTick = () => {
-      this.floatTick()
       this.containBodies()
+      this.dvdTick()
     }
     Matter.Events.on(engine, 'afterUpdate', onTick)
     this.detachEvents = () => Matter.Events.off(engine, 'afterUpdate', onTick)
@@ -475,7 +487,7 @@ export class PhysicsController {
     this.engine.gravity.y = gravity.y * scale
   }
 
-  /** random float: no gravity, bodies drift and gently self-propel */
+  /** DVD-screensaver mode: no gravity/friction, constant-speed bounce off walls */
   setFloatMode(on: boolean): void {
     if (this.floatMode === on) return
     this.floatMode = on
@@ -488,15 +500,16 @@ export class PhysicsController {
     if (!this.engine) return
     this.engine.gravity.x = 0
     this.engine.gravity.y = 0
-    // kick each body off in a random direction so drift starts immediately
     for (const body of this.bodies) {
-      const angle = Math.random() * Math.PI * 2
-      const strength = PHYSICS.floatImpulse * 6 * body.mass
-      Matter.Body.applyForce(body, body.position, {
-        x: Math.cos(angle) * strength,
-        y: Math.sin(angle) * strength,
-      })
-      Matter.Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.05)
+      // frictionless, perfectly elastic so the constant speed survives bounces
+      body.frictionAir = 0
+      body.friction = 0
+      body.restitution = 1
+      Matter.Body.setAngle(body, 0)
+      Matter.Body.setAngularVelocity(body, 0)
+      // launch in a slanted direction (avoid pure horizontal/vertical, like the DVD logo)
+      const a = (0.2 + Math.random() * 0.3 + (Math.random() < 0.5 ? 0 : 0.5)) * Math.PI * 2
+      Matter.Body.setVelocity(body, { x: Math.cos(a) * PHYSICS.dvdSpeed, y: Math.sin(a) * PHYSICS.dvdSpeed })
     }
   }
 
@@ -504,25 +517,76 @@ export class PhysicsController {
     if (!this.engine) return
     this.engine.gravity.x = 0
     this.engine.gravity.y = PHYSICS.gravityScale * this.tuning.gravity
+    for (const body of this.bodies) {
+      body.frictionAir = PHYSICS.frictionAir * this.tuning.airDrag
+      body.friction = PHYSICS.friction
+      body.restitution = this.tuning.bounciness
+    }
   }
 
-  /** keep floating bodies drifting: nudge the slow ones, cap the fast ones */
-  private floatTick(): void {
+  /** hold every body at the constant DVD speed and stop it from spinning */
+  private dvdTick(): void {
     if (!this.floatMode) return
     for (const body of this.bodies) {
-      const speed = Math.hypot(body.velocity.x, body.velocity.y)
-      if (speed < PHYSICS.floatMinSpeed) {
-        const angle = Math.random() * Math.PI * 2
-        const strength = PHYSICS.floatImpulse * body.mass
-        Matter.Body.applyForce(body, body.position, {
-          x: Math.cos(angle) * strength,
-          y: Math.sin(angle) * strength,
-        })
-      } else if (speed > PHYSICS.floatMaxSpeed) {
-        const s = PHYSICS.floatMaxSpeed / speed
-        Matter.Body.setVelocity(body, { x: body.velocity.x * s, y: body.velocity.y * s })
+      let { x, y } = body.velocity
+      const mag = Math.hypot(x, y)
+      if (mag < 0.001) {
+        const a = Math.random() * Math.PI * 2
+        x = Math.cos(a)
+        y = Math.sin(a)
       }
+      const s = PHYSICS.dvdSpeed / Math.hypot(x, y)
+      Matter.Body.setVelocity(body, { x: x * s, y: y * s })
+      Matter.Body.setAngularVelocity(body, 0)
     }
+  }
+
+  /** temporarily disable Matter body dragging (during a two-finger gesture) */
+  suspendDrag(): void {
+    if (this.mouseConstraint) {
+      this.mouseConstraint.constraint.stiffness = 0
+      // runtime allows null (no grabbed body); @types/matter-js types it too strictly
+      ;(this.mouseConstraint as { body: Matter.Body | null }).body = null
+    }
+  }
+
+  resumeDrag(): void {
+    if (this.mouseConstraint) this.mouseConstraint.constraint.stiffness = 0.2
+  }
+
+  /** topmost image body under a viewport point, or null */
+  bodyAt(x: number, y: number): { bodyId: number; imageId: string } | null {
+    const hits = Matter.Query.point(this.bodies, { x, y })
+    const body = hits[hits.length - 1]
+    if (!body) return null
+    return { bodyId: body.id, imageId: this.bodyImageId.get(body.id) ?? '' }
+  }
+
+  getBodyRelativeScale(bodyId: number): number {
+    return this.bodyRelScale.get(bodyId) ?? 1
+  }
+
+  /** scale one body toward targetRel (relative to its built size), clamped; returns the applied rel */
+  setBodyRelativeScale(bodyId: number, targetRel: number): number {
+    const body = this.bodies.find((b) => b.id === bodyId)
+    const base = this.bodyBaseDiameter.get(bodyId)
+    if (!body || !base) return 1
+    const relMin = (PHYSICS.minBodyPx * 0.8) / base
+    const relMax = (PHYSICS.maxBodyPx * 1.4) / base
+    const rel = clamp(targetRel, relMin, relMax)
+    const current = this.bodyRelScale.get(bodyId) ?? 1
+    const factor = rel / current
+    if (Math.abs(factor - 1) < 1e-4) return current
+    Matter.Body.scale(body, factor, factor)
+    const sprite = body.render.sprite
+    if (sprite) {
+      sprite.xScale *= factor
+      sprite.yScale *= factor
+    }
+    const r = this.radii.get(bodyId)
+    if (r) this.radii.set(bodyId, r * factor)
+    this.bodyRelScale.set(bodyId, rel)
+    return rel
   }
 
   /** impulse from sensor shaking; direction is the screen-mapped linear acceleration */
@@ -603,7 +667,11 @@ export class PhysicsController {
     }
     this.bodies = []
     this.walls = []
+    this.mouseConstraint = null
     this.radii.clear()
+    this.bodyImageId.clear()
+    this.bodyRelScale.clear()
+    this.bodyBaseDiameter.clear()
     this.engine = null
     this.render = null
     this.runner = null

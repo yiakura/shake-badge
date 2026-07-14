@@ -67,6 +67,10 @@ export interface BadgeSettings {
   /** draw a dark outline + drop shadow behind the name for legibility */
   nameShadow: boolean
   namePosition: NamePosition
+  /** custom stage name center, normalized [0,1] of the viewport; null = derive from namePosition */
+  nameOffset: { x: number; y: number } | null
+  /** custom stage name size multiplier on fontSizePx */
+  nameScale: number
   themeId: string
   style: BadgeStyle
   imageShape: ImageShape

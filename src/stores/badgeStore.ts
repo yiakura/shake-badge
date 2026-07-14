@@ -37,6 +37,8 @@ export function defaultSettings(): BadgeSettings {
     showName: true,
     nameShadow: false,
     namePosition: 'bottom',
+    nameOffset: null,
+    nameScale: 1,
     themeId: DEFAULT_THEME.id,
     style: structuredClone(DEFAULT_THEME.style),
     imageShape: 'circle',

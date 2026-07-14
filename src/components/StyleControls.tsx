@@ -267,7 +267,10 @@ export function StyleControls() {
         max={RANGES.fontSizePx.max}
         step={RANGES.fontSizePx.step}
         value={style.fontSizePx}
-        onChange={(fontSizePx) => updateStyle({ fontSizePx })}
+        onChange={(fontSizePx) => {
+          updateStyle({ fontSizePx })
+          updateSettings({ nameScale: 1 }) // editor slider is authoritative; drop any stage pinch scale
+        }}
         format={(v) => `${v} px`}
       />
 
@@ -384,10 +387,16 @@ export function StyleControls() {
           <div>
             <span className="field-label">{t('editor.namePosition')}</span>
             <div className="flex gap-2">
-              <Chip on={settings.namePosition === 'top'} onClick={() => updateSettings({ namePosition: 'top' })}>
+              <Chip
+                on={settings.namePosition === 'top'}
+                onClick={() => updateSettings({ namePosition: 'top', nameOffset: null })}
+              >
                 {t('position.top')}
               </Chip>
-              <Chip on={settings.namePosition === 'bottom'} onClick={() => updateSettings({ namePosition: 'bottom' })}>
+              <Chip
+                on={settings.namePosition === 'bottom'}
+                onClick={() => updateSettings({ namePosition: 'bottom', nameOffset: null })}
+              >
                 {t('position.bottom')}
               </Chip>
             </div>

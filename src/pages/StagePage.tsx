@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { navigate } from '../hooks/useHashRoute'
-import { useBadgeStore } from '../stores/badgeStore'
+import {
+  persistSettings,
+  updateImage,
+  updateSettings,
+  useBadgeStore,
+} from '../stores/badgeStore'
 import { backgroundCss } from '../config/themes'
 import { PHYSICS } from '../config/physics'
+import { STAGE, defaultNameOffset } from '../config/stage'
 import { PhysicsController } from '../services/physics'
 import {
   DeviceMotionService,
@@ -15,7 +21,9 @@ import { useWakeLock } from '../hooks/useWakeLock'
 import { useFullscreen } from '../hooks/useFullscreen'
 import { useAutoHide } from '../hooks/useAutoHide'
 import { useObjectUrl } from '../hooks/useObjectUrl'
+import { useStageGestures } from '../hooks/useStageGestures'
 import { StageControlBar } from '../components/StageControlBar'
+import { StageLockButton } from '../components/StageLockButton'
 import { MotionPermissionOverlay } from '../components/MotionPermissionOverlay'
 import { nameFontFamily } from '../services/fontService'
 import { nameTextShadow } from '../utils/badgeText'
@@ -23,30 +31,27 @@ import { showToast } from '../stores/toastStore'
 import { debounce } from '../utils/debounce'
 import { t } from '../i18n'
 
-type MotionUiState =
-  | 'unsupported'
-  | 'need-permission'
-  | 'denied'
-  | 'active'
-  | 'paused'
-  | 'no-data'
+type MotionUiState = 'unsupported' | 'need-permission' | 'denied' | 'active' | 'paused' | 'no-data'
 
 export function StagePage() {
   const { settings, images, backgroundImage } = useBadgeStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const controllerRef = useRef<PhysicsController | null>(null)
   const motionRef = useRef<DeviceMotionService | null>(null)
-  const tapRef = useRef<{ x: number; y: number; time: number } | null>(null)
+  const nameRef = useRef<HTMLDivElement>(null)
+  const unlockTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const [motionUi, setMotionUi] = useState<MotionUiState>('paused')
   const [nameShown, setNameShown] = useState(settings.showName)
   const [wakeEnabled, setWakeEnabled] = useState(true)
   const [floatOn, setFloatOn] = useState(false)
+  const [locked, setLocked] = useState(false)
+  const [unlockCount, setUnlockCount] = useState(0)
 
   const hasImages = images.length > 0
   const { supported: wakeSupported, active: wakeActive } = useWakeLock(wakeEnabled && hasImages)
   const fullscreen = useFullscreen()
-  const controls = useAutoHide(4000)
+  const controls = useAutoHide(STAGE.autoHideMs)
 
   // sensor data flows straight into the physics engine — never through React state
   const feedPhysics = useCallback((sample: MotionSample) => {
@@ -63,7 +68,9 @@ export function StagePage() {
     if (!hasImages) navigate('edit')
   }, [hasImages])
 
-  // physics world lifecycle
+  // physics world lifecycle — rebuild only when the image set/order or layout changes,
+  // NOT when a single image's size changes (pinch applies live to the existing body)
+  const imageKey = images.map((record) => record.id).join('|')
   useEffect(() => {
     const element = containerRef.current
     if (!element || images.length === 0) return
@@ -100,10 +107,9 @@ export function StagePage() {
       controller.destroy()
       controllerRef.current = null
     }
-    // floatOn intentionally excluded — a dedicated effect toggles it without a rebuild
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    images,
+    imageKey,
     settings.imageShape,
     settings.imageBasePercent,
     settings.imageOutline,
@@ -111,7 +117,7 @@ export function StagePage() {
     settings.physics,
   ])
 
-  // toggle float without tearing down the physics world
+  // toggle DVD-bounce mode without tearing down the physics world
   useEffect(() => {
     controllerRef.current?.setFloatMode(floatOn)
   }, [floatOn])
@@ -158,6 +164,50 @@ export function StagePage() {
   const stageBgUrl = useObjectUrl(style.background.type === 'image' ? backgroundImage : null)
   const nameLines = [settings.name, settings.nameLine2].filter((line) => line.trim().length > 0)
   const showNameOverlay = nameShown && nameLines.length > 0
+  const nameOffset = settings.nameOffset ?? defaultNameOffset(settings.namePosition)
+  const overlayUp = motionUi === 'need-permission' || motionUi === 'denied'
+
+  // two-finger gestures: pinch an image, or drag + pinch the name (center-line snap)
+  useStageGestures({
+    hostRef: containerRef,
+    controllerRef,
+    nameRef,
+    enabled: !locked && !overlayUp,
+    nameShown: showNameOverlay,
+    fontBasePx: style.fontSizePx,
+    getNameScale: () => settings.nameScale,
+    getImageSizeScale: (id) => images.find((record) => record.id === id)?.sizeScale ?? 1,
+    onReveal: () => controls.poke(),
+    onNameCommit: (offset, scale) => {
+      updateSettings({ nameOffset: offset, nameScale: scale })
+      void persistSettings()
+    },
+    onImageCommit: (imageId, sizeScale) => {
+      const record = images.find((r) => r.id === imageId)
+      if (record) void updateImage({ ...record, sizeScale })
+    },
+  })
+
+  function pressLock(): void {
+    controls.poke()
+    if (!locked) {
+      setLocked(true)
+      setUnlockCount(0)
+      return
+    }
+    setUnlockCount((prev) => {
+      const next = prev + 1
+      clearTimeout(unlockTimer.current)
+      if (next >= STAGE.unlockPresses) {
+        setLocked(false)
+        return 0
+      }
+      unlockTimer.current = setTimeout(() => setUnlockCount(0), STAGE.unlockResetMs)
+      return next
+    })
+  }
+
+  useEffect(() => () => clearTimeout(unlockTimer.current), [])
 
   if (!hasImages) {
     return (
@@ -181,54 +231,41 @@ export function StagePage() {
           : { background: backgroundCss(style.background) }
       }
     >
-      {/* physics canvas host — taps (without drags) reveal the controls */}
+      {/* physics canvas host — canvas touch is disabled while locked */}
       <div
         ref={containerRef}
         data-testid="stage-canvas"
-        className="absolute inset-0 touch-none"
-        onPointerDown={(event) => {
-          tapRef.current = { x: event.clientX, y: event.clientY, time: Date.now() }
-        }}
-        onPointerUp={(event) => {
-          const start = tapRef.current
-          tapRef.current = null
-          if (!start) return
-          const distance = Math.hypot(event.clientX - start.x, event.clientY - start.y)
-          if (distance < 12 && Date.now() - start.time < 500) controls.poke()
-        }}
+        className={`absolute inset-0 touch-none ${locked ? '[&>canvas]:pointer-events-none' : ''}`}
       />
 
       {showNameOverlay && (
         <div
-          className={`absolute inset-x-0 z-10 pointer-events-none flex justify-center px-6
-            ${settings.namePosition === 'top'
-              ? 'top-[calc(env(safe-area-inset-top)+1.75rem)]'
-              : 'bottom-[calc(env(safe-area-inset-bottom)+6.5rem)]'}`}
+          ref={nameRef}
+          data-testid="stage-name"
+          className={`absolute z-10 pointer-events-none font-display font-extrabold text-center -translate-x-1/2 -translate-y-1/2
+            ${settings.nameDirection === 'vertical' ? '[writing-mode:vertical-rl] max-h-[62vh]' : 'break-words max-w-[86vw]'}`}
+          style={{
+            left: `${nameOffset.x * 100}%`,
+            top: `${nameOffset.y * 100}%`,
+            fontSize: style.fontSizePx * settings.nameScale,
+            color: style.textColor,
+            fontFamily: nameFontFamily(settings.customFontName),
+            textShadow: nameTextShadow({
+              outline: settings.nameShadow,
+              outlinePx: Math.max(1, Math.round((style.fontSizePx * settings.nameScale) / 28)),
+              glow: style.nameGlow,
+              glowBlur: [14, 40],
+              fallback: '0 1px 12px rgba(0,0,0,0.25)',
+            }),
+          }}
         >
-          <div
-            className={`font-display font-extrabold text-center
-              ${settings.nameDirection === 'vertical' ? '[writing-mode:vertical-rl] max-h-[62vh]' : 'break-all max-w-full'}`}
-            style={{
-              fontSize: style.fontSizePx,
-              color: style.textColor,
-              fontFamily: nameFontFamily(settings.customFontName),
-              textShadow: nameTextShadow({
-                outline: settings.nameShadow,
-                outlinePx: Math.max(1, Math.round(style.fontSizePx / 28)),
-                glow: style.nameGlow,
-                glowBlur: [14, 40],
-                fallback: '0 1px 12px rgba(0,0,0,0.25)',
-              }),
-            }}
-          >
-            {nameLines.map((line, index) => (
-              <p key={index}>{line}</p>
-            ))}
-          </div>
+          {nameLines.map((line, index) => (
+            <p key={index}>{line}</p>
+          ))}
         </div>
       )}
 
-      {(motionUi === 'need-permission' || motionUi === 'denied') && (
+      {overlayUp && (
         <MotionPermissionOverlay
           mode={motionUi === 'denied' ? 'denied' : 'ask'}
           onEnable={() => void enableMotion()}
@@ -236,23 +273,27 @@ export function StagePage() {
         />
       )}
 
-      <StageControlBar
-        visible={controls.visible}
-        floatOn={floatOn}
-        wakeSupported={wakeSupported}
-        wakeActive={wakeActive}
-        fullscreenSupported={fullscreen.supported}
-        fullscreenActive={fullscreen.active}
-        nameShown={nameShown}
-        onBack={() => navigate('edit')}
-        onToggleFloat={() => setFloatOn((on) => !on)}
-        onShake={() => controllerRef.current?.shakeAll()}
-        onReset={() => controllerRef.current?.resetPositions()}
-        onToggleFullscreen={fullscreen.toggle}
-        onToggleWake={() => setWakeEnabled((enabled) => !enabled)}
-        onToggleName={() => setNameShown((shown) => !shown)}
-        onInteract={controls.poke}
-      />
+      <StageLockButton locked={locked} visible={controls.visible} unlockCount={unlockCount} onPress={pressLock} />
+
+      {!locked && (
+        <StageControlBar
+          visible={controls.visible}
+          floatOn={floatOn}
+          wakeSupported={wakeSupported}
+          wakeActive={wakeActive}
+          fullscreenSupported={fullscreen.supported}
+          fullscreenActive={fullscreen.active}
+          nameShown={nameShown}
+          onBack={() => navigate('edit')}
+          onToggleFloat={() => setFloatOn((on) => !on)}
+          onShake={() => controllerRef.current?.shakeAll()}
+          onReset={() => controllerRef.current?.resetPositions()}
+          onToggleFullscreen={fullscreen.toggle}
+          onToggleWake={() => setWakeEnabled((enabled) => !enabled)}
+          onToggleName={() => setNameShown((shown) => !shown)}
+          onInteract={controls.poke}
+        />
+      )}
     </div>
   )
 }

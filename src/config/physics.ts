@@ -44,13 +44,13 @@ export const PHYSICS = {
   /** speed cap in px/frame so shakes stay lively but controllable */
   maxSpeed: 42,
 
-  /* random float mode (no gravity, gentle self-propelled drift) */
-  /** per-tick nudge (per unit mass) applied to slow bodies while floating */
-  floatImpulse: 0.00025,
-  /** below this speed a floating body gets nudged */
-  floatMinSpeed: 0.7,
-  /** floating bodies are capped to this gentle speed */
-  floatMaxSpeed: 2.6,
+  /* DVD-screensaver float mode: constant-velocity bounce, no gravity/friction */
+  /** constant speed (px/frame) every body is held at while floating */
+  dvdSpeed: 3.2,
+
+  /* per-image pinch-zoom (multiplies the stored sizeScale) */
+  imagePinchMin: 0.35,
+  imagePinchMax: 3.2,
 } as const
 
 export type PhysicsConfig = typeof PHYSICS
