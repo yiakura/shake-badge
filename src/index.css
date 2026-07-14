@@ -1,0 +1,132 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: "Baloo 2";
+  src: url("/fonts/baloo2-latin.woff2") format("woff2");
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --font-display: "Baloo 2", "PingFang TC", "Noto Sans TC", system-ui, sans-serif;
+  --font-body: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+
+  /* toy-console chrome palette */
+  --color-cream: #f6f1e7;
+  --color-paper: #fffdf7;
+  --color-ink: #232842;
+  --color-ink-soft: #5f6584;
+  --color-night: #12152a;
+  --color-night-card: #1d2242;
+  --color-frost: #eef0fb;
+  --color-frost-soft: #b9bed8;
+  --color-accent: #ff5c39;
+  --color-accent-deep: #d63a17;
+  --color-berry: #ff3d77;
+  --color-sun: #ffb03a;
+
+  --radius-card: 1.375rem;
+  --radius-btn: 1rem;
+
+  --animate-swing: swing 3.4s ease-in-out infinite;
+  --animate-rise: rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-pop: pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  --animate-fade: fade 0.25s ease both;
+}
+
+@keyframes swing {
+  0%, 100% { transform: rotate(2.2deg); }
+  50% { transform: rotate(-2.2deg); }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pop {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@utility pt-safe { padding-top: env(safe-area-inset-top); }
+@utility pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+@utility pl-safe { padding-left: env(safe-area-inset-left); }
+@utility pr-safe { padding-right: env(safe-area-inset-right); }
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-cream text-ink dark:bg-night dark:text-frost font-body antialiased;
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  input, button, select, textarea {
+    font: inherit;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* subtle dot-grid texture for chrome pages */
+  .bg-dots {
+    background-image: radial-gradient(color-mix(in srgb, currentColor 9%, transparent) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  .card {
+    @apply bg-paper dark:bg-night-card rounded-card border border-ink/8 dark:border-frost/10 shadow-[0_2px_10px_rgba(20,20,45,0.06)];
+  }
+
+  /* chunky pressable buttons — toy-console feel, ≥44px targets.
+     usage: class="btn btn-primary" (v4 @apply can't reference component classes) */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-btn font-bold select-none
+      min-h-11 px-5 transition-[transform,box-shadow,background-color] duration-100
+      disabled:opacity-40 disabled:pointer-events-none;
+    touch-action: manipulation;
+  }
+  .btn-primary {
+    @apply text-white bg-gradient-to-br from-accent to-berry
+      shadow-[0_4px_0_var(--color-accent-deep)]
+      active:translate-y-[3px] active:shadow-none;
+  }
+  .btn-secondary {
+    @apply bg-paper text-ink border-2 border-ink/15
+      shadow-[0_4px_0_rgba(35,40,66,0.18)]
+      active:translate-y-[3px] active:shadow-none
+      dark:bg-night-card dark:text-frost dark:border-frost/20 dark:shadow-[0_4px_0_rgba(0,0,0,0.5)];
+  }
+  .btn-ghost {
+    @apply text-ink-soft dark:text-frost-soft hover:text-ink dark:hover:text-frost;
+  }
+  .btn-danger {
+    @apply text-accent-deep dark:text-accent border-2 border-accent/40
+      active:translate-y-[2px];
+  }
+  .btn-icon {
+    @apply min-w-11 px-0;
+  }
+
+  .field-label {
+    @apply block text-sm font-bold text-ink-soft dark:text-frost-soft mb-2;
+  }
+
+  .chip {
+    @apply inline-flex items-center justify-center min-h-11 px-4 rounded-full border-2 text-sm font-bold
+      border-ink/15 text-ink-soft transition-colors
+      dark:border-frost/20 dark:text-frost-soft;
+    touch-action: manipulation;
+  }
+  .chip-on {
+    @apply border-accent text-accent-deep bg-accent/10 dark:text-accent;
+  }
+}
