@@ -27,8 +27,10 @@ function sampleSettings(overrides: Partial<BadgeSettings> = {}): BadgeSettings {
     showName: true,
     nameShadow: false,
     namePosition: 'bottom',
-    nameOffset: null,
-    nameScale: 1,
+    nameLayout: [
+      { offset: null, scale: 1 },
+      { offset: null, scale: 1 },
+    ],
     themeId: 'neon-dark',
     style: {
       background: { type: 'gradient', from: '#000000', to: '#222222', angle: 160 },

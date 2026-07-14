@@ -43,8 +43,10 @@ function makeSettings(overrides: Partial<BadgeSettings> = {}): BadgeSettings {
     showName: true,
     nameShadow: false,
     namePosition: 'bottom',
-    nameOffset: null,
-    nameScale: 1,
+    nameLayout: [
+      { offset: null, scale: 1 },
+      { offset: null, scale: 1 },
+    ],
     themeId: 'neon-dark',
     style: {
       background: { type: 'gradient', from: '#0d0221', to: '#2b0a4e', angle: 160 },

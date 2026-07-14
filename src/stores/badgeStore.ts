@@ -4,6 +4,7 @@ import type {
   BadgeStyle,
   ImageRecord,
   LegacySettingsV1,
+  NameLineLayout,
   StoredSettings,
 } from '../types/badge'
 import { SETTINGS_SCHEMA_VERSION } from '../types/badge'
@@ -37,8 +38,10 @@ export function defaultSettings(): BadgeSettings {
     showName: true,
     nameShadow: false,
     namePosition: 'bottom',
-    nameOffset: null,
-    nameScale: 1,
+    nameLayout: [
+      { offset: null, scale: 1 },
+      { offset: null, scale: 1 },
+    ],
     themeId: DEFAULT_THEME.id,
     style: structuredClone(DEFAULT_THEME.style),
     imageShape: 'circle',
@@ -93,6 +96,23 @@ function isLegacyV1(saved: StoredSettings): saved is LegacySettingsV1 {
   return saved.schemaVersion === 1
 }
 
+/** always return exactly two valid line layouts, migrating the old single offset/scale onto line 0 */
+function normalizeNameLayout(saved: StoredSettings): NameLineLayout[] {
+  const legacy = saved as Partial<{
+    nameLayout: NameLineLayout[]
+    nameOffset: { x: number; y: number } | null
+    nameScale: number
+  }>
+  const source = legacy.nameLayout ?? [
+    { offset: legacy.nameOffset ?? null, scale: legacy.nameScale ?? 1 },
+    { offset: null, scale: 1 },
+  ]
+  return [0, 1].map((i) => ({
+    offset: source[i]?.offset ?? null,
+    scale: source[i]?.scale ?? 1,
+  }))
+}
+
 /** upgrade any stored record to the current schema (v1 chips → v2 sliders etc.) */
 export function normalizeSettings(saved: StoredSettings): BadgeSettings {
   if (isLegacyV1(saved)) {
@@ -104,6 +124,7 @@ export function normalizeSettings(saved: StoredSettings): BadgeSettings {
       schemaVersion: SETTINGS_SCHEMA_VERSION,
       style: { ...styleRest, fontSizePx: V1_FONT_PX[fontSize] ?? RANGES.fontSizePx.default },
       imageBasePercent: V1_SIZE_PERCENT[imageSize] ?? RANGES.imageBasePercent.default,
+      nameLayout: normalizeNameLayout(saved),
     }
   }
   return {
@@ -112,6 +133,7 @@ export function normalizeSettings(saved: StoredSettings): BadgeSettings {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     // nested additive fields: merge so records saved before the field existed get defaults
     physics: { ...defaultPhysicsTuning(), ...saved.physics },
+    nameLayout: normalizeNameLayout(saved),
   }
 }
 

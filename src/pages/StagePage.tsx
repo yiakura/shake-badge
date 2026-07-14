@@ -8,7 +8,7 @@ import {
 } from '../stores/badgeStore'
 import { backgroundCss } from '../config/themes'
 import { PHYSICS } from '../config/physics'
-import { STAGE, defaultNameOffset } from '../config/stage'
+import { STAGE, defaultLineOffset } from '../config/stage'
 import { PhysicsController } from '../services/physics'
 import {
   DeviceMotionService,
@@ -38,7 +38,7 @@ export function StagePage() {
   const containerRef = useRef<HTMLDivElement>(null)
   const controllerRef = useRef<PhysicsController | null>(null)
   const motionRef = useRef<DeviceMotionService | null>(null)
-  const nameRef = useRef<HTMLDivElement>(null)
+  const nameLineEls = useRef(new Map<number, HTMLDivElement>())
   const unlockTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const [motionUi, setMotionUi] = useState<MotionUiState>('paused')
@@ -162,24 +162,46 @@ export function StagePage() {
 
   const { style } = settings
   const stageBgUrl = useObjectUrl(style.background.type === 'image' ? backgroundImage : null)
-  const nameLines = [settings.name, settings.nameLine2].filter((line) => line.trim().length > 0)
-  const showNameOverlay = nameShown && nameLines.length > 0
-  const nameOffset = settings.nameOffset ?? defaultNameOffset(settings.namePosition)
+  // visible name lines: index 0 = name, 1 = nameLine2 (each positioned/scaled independently)
+  const visibleLines = [
+    { role: 0, text: settings.name },
+    { role: 1, text: settings.nameLine2 },
+  ].filter((line) => line.text.trim().length > 0)
+  const showNameOverlay = nameShown && visibleLines.length > 0
   const overlayUp = motionUi === 'need-permission' || motionUi === 'denied'
 
-  // two-finger gestures: pinch an image, or drag + pinch the name (center-line snap)
+  const setLineEl = (role: number) => (el: HTMLDivElement | null) => {
+    if (el) nameLineEls.current.set(role, el)
+    else nameLineEls.current.delete(role)
+  }
+
+  // two-finger gestures: pinch an image, or drag + pinch a single name line (center-line snap)
   useStageGestures({
     hostRef: containerRef,
     controllerRef,
-    nameRef,
     enabled: !locked && !overlayUp,
-    nameShown: showNameOverlay,
     fontBasePx: style.fontSizePx,
-    getNameScale: () => settings.nameScale,
+    hitNameLine: (x, y) => {
+      let best: { index: number; el: HTMLElement; scale: number } | null = null
+      let bestDist = Infinity
+      const pad = 24
+      for (const [role, el] of nameLineEls.current) {
+        const r = el.getBoundingClientRect()
+        if (x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad) {
+          const d = Math.hypot(x - (r.left + r.right) / 2, y - (r.top + r.bottom) / 2)
+          if (d < bestDist) {
+            bestDist = d
+            best = { index: role, el, scale: settings.nameLayout[role]?.scale ?? 1 }
+          }
+        }
+      }
+      return best
+    },
     getImageSizeScale: (id) => images.find((record) => record.id === id)?.sizeScale ?? 1,
     onReveal: () => controls.poke(),
-    onNameCommit: (offset, scale) => {
-      updateSettings({ nameOffset: offset, nameScale: scale })
+    onNameCommit: (index, offset, scale) => {
+      const nameLayout = settings.nameLayout.map((line, i) => (i === index ? { offset, scale } : line))
+      updateSettings({ nameLayout })
       void persistSettings()
     },
     onImageCommit: (imageId, sizeScale) => {
@@ -238,32 +260,37 @@ export function StagePage() {
         className={`absolute inset-0 touch-none ${locked ? '[&>canvas]:pointer-events-none' : ''}`}
       />
 
-      {showNameOverlay && (
-        <div
-          ref={nameRef}
-          data-testid="stage-name"
-          className={`absolute z-10 pointer-events-none font-display font-extrabold text-center -translate-x-1/2 -translate-y-1/2
-            ${settings.nameDirection === 'vertical' ? '[writing-mode:vertical-rl] max-h-[62vh]' : 'break-words max-w-[86vw]'}`}
-          style={{
-            left: `${nameOffset.x * 100}%`,
-            top: `${nameOffset.y * 100}%`,
-            fontSize: style.fontSizePx * settings.nameScale,
-            color: style.textColor,
-            fontFamily: nameFontFamily(settings.customFontName),
-            textShadow: nameTextShadow({
-              outline: settings.nameShadow,
-              outlinePx: Math.max(1, Math.round((style.fontSizePx * settings.nameScale) / 28)),
-              glow: style.nameGlow,
-              glowBlur: [14, 40],
-              fallback: '0 1px 12px rgba(0,0,0,0.25)',
-            }),
-          }}
-        >
-          {nameLines.map((line, index) => (
-            <p key={index}>{line}</p>
-          ))}
-        </div>
-      )}
+      {showNameOverlay &&
+        visibleLines.map((line, i) => {
+          const layout = settings.nameLayout[line.role] ?? { offset: null, scale: 1 }
+          const off = layout.offset ?? defaultLineOffset(settings.namePosition, i, visibleLines.length)
+          const size = style.fontSizePx * layout.scale
+          return (
+            <div
+              key={line.role}
+              ref={setLineEl(line.role)}
+              data-testid={`stage-name-${line.role}`}
+              className={`absolute z-10 pointer-events-none font-display font-extrabold text-center -translate-x-1/2 -translate-y-1/2
+                ${settings.nameDirection === 'vertical' ? '[writing-mode:vertical-rl] max-h-[62vh]' : 'break-words max-w-[86vw]'}`}
+              style={{
+                left: `${off.x * 100}%`,
+                top: `${off.y * 100}%`,
+                fontSize: size,
+                color: style.textColor,
+                fontFamily: nameFontFamily(settings.customFontName),
+                textShadow: nameTextShadow({
+                  outline: settings.nameShadow,
+                  outlinePx: Math.max(1, Math.round(size / 28)),
+                  glow: style.nameGlow,
+                  glowBlur: [14, 40],
+                  fallback: '0 1px 12px rgba(0,0,0,0.25)',
+                }),
+              }}
+            >
+              {line.text}
+            </div>
+          )
+        })}
 
       {overlayUp && (
         <MotionPermissionOverlay

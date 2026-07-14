@@ -71,6 +71,27 @@ describe('normalizeSettings — v1 → v2 migration', () => {
     })
   })
 
+  it('always yields two name-line layouts and migrates a legacy single offset/scale onto line 0', () => {
+    const legacy = {
+      ...defaultSettings(),
+      nameLayout: undefined,
+      nameOffset: { x: 0.3, y: 0.7 },
+      nameScale: 1.8,
+    } as unknown as Parameters<typeof normalizeSettings>[0]
+    const migrated = normalizeSettings(legacy)
+    expect(migrated.nameLayout).toHaveLength(2)
+    expect(migrated.nameLayout[0]).toEqual({ offset: { x: 0.3, y: 0.7 }, scale: 1.8 })
+    expect(migrated.nameLayout[1]).toEqual({ offset: null, scale: 1 })
+  })
+
+  it('keeps an existing two-line nameLayout', () => {
+    const layout = [
+      { offset: { x: 0.2, y: 0.2 }, scale: 1.5 },
+      { offset: { x: 0.8, y: 0.9 }, scale: 0.7 },
+    ]
+    expect(normalizeSettings({ ...defaultSettings(), nameLayout: layout }).nameLayout).toEqual(layout)
+  })
+
   it('gives v1 records the default physics tuning', () => {
     expect(normalizeSettings(legacyV1()).physics).toEqual({
       gravity: 1,

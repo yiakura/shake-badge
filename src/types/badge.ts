@@ -36,6 +36,14 @@ export interface PhysicsTuning {
   airDrag: number
 }
 
+/** custom stage layout for one name line */
+export interface NameLineLayout {
+  /** normalized [0,1] center of the viewport; null = derive from namePosition */
+  offset: { x: number; y: number } | null
+  /** size multiplier on fontSizePx */
+  scale: number
+}
+
 /** square crop window in source-image pixel coordinates */
 export interface CropParams {
   x: number
@@ -67,10 +75,8 @@ export interface BadgeSettings {
   /** draw a dark outline + drop shadow behind the name for legibility */
   nameShadow: boolean
   namePosition: NamePosition
-  /** custom stage name center, normalized [0,1] of the viewport; null = derive from namePosition */
-  nameOffset: { x: number; y: number } | null
-  /** custom stage name size multiplier on fontSizePx */
-  nameScale: number
+  /** per-line stage layout (index 0 = name, 1 = nameLine2); each line drags/scales independently */
+  nameLayout: NameLineLayout[]
   themeId: string
   style: BadgeStyle
   imageShape: ImageShape

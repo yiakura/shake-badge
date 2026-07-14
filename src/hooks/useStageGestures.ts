@@ -4,32 +4,37 @@ import { PHYSICS } from '../config/physics'
 import { STAGE } from '../config/stage'
 import { centroid, clamp, distance, pinchFactor, snapToLine, type Point } from '../utils/gestureMath'
 
+export interface NameLineHit {
+  index: number
+  el: HTMLElement
+  scale: number
+}
+
 export interface StageGestureProps {
   hostRef: RefObject<HTMLElement | null>
   controllerRef: RefObject<PhysicsController | null>
-  nameRef: RefObject<HTMLElement | null>
   /** two-finger gestures active (false while locked or an overlay is up) */
   enabled: boolean
-  nameShown: boolean
   /** base name font size (px) before the custom scale multiplier */
   fontBasePx: number
-  getNameScale: () => number
+  /** which name line (if any) sits under a viewport point */
+  hitNameLine: (x: number, y: number) => NameLineHit | null
   getImageSizeScale: (imageId: string) => number
   onReveal: () => void
-  onNameCommit: (offset: { x: number; y: number }, scale: number) => void
+  onNameCommit: (index: number, offset: { x: number; y: number }, scale: number) => void
   onImageCommit: (imageId: string, sizeScale: number) => void
 }
 
 type Gesture =
-  | { kind: 'name'; startDist: number; startCentroid: Point; startScale: number; startCenter: Point; center: Point; scale: number }
+  | { kind: 'name'; index: number; el: HTMLElement; startDist: number; startCentroid: Point; startScale: number; startCenter: Point; center: Point; scale: number }
   | { kind: 'image'; bodyId: number; imageId: string; startDist: number; startRel: number }
 
 /**
  * Multi-touch layer over the physics canvas:
- *  - two fingers on an image  → pinch-zoom that image (persist size)
- *  - two fingers on the name  → drag (center-line snap) + pinch-zoom (persist)
- *  - single tap on empty space → reveal the controls
- * Single-finger body dragging stays with Matter's MouseConstraint.
+ *  - two fingers on an image     → pinch-zoom that image (persist size)
+ *  - two fingers on a name line  → drag (center-line snap) + pinch-zoom that line (persist)
+ *  - single tap on empty space   → reveal the controls
+ * Each name line is targeted independently. Single-finger body dragging stays with Matter.
  */
 export function useStageGestures(props: StageGestureProps): void {
   const propsRef = useRef(props)
@@ -57,30 +62,29 @@ export function useStageGestures(props: StageGestureProps): void {
       if (pts.length < 2) return
       const c = centroid(pts)
       const vp = viewport()
-      const local = { x: c.x - vp.left, y: c.y - vp.top }
 
-      // name has priority when the pinch lands on it
-      const nameEl = p.nameRef.current
-      if (p.nameShown && nameEl) {
-        const r = nameEl.getBoundingClientRect()
-        const pad = 24
-        if (c.x >= r.left - pad && c.x <= r.right + pad && c.y >= r.top - pad && c.y <= r.bottom + pad) {
-          p.controllerRef.current?.suspendDrag()
-          gesture.current = {
-            kind: 'name',
-            startDist: distance(pts[0], pts[1]),
-            startCentroid: c,
-            startScale: p.getNameScale(),
-            startCenter: { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 },
-            center: { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 },
-            scale: p.getNameScale(),
-          }
-          twoFingerUsed.current = true
-          return
+      // a name line takes priority when the pinch lands on it
+      const nameHit = p.hitNameLine(c.x, c.y)
+      if (nameHit) {
+        const r = nameHit.el.getBoundingClientRect()
+        const center = { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 }
+        p.controllerRef.current?.suspendDrag()
+        gesture.current = {
+          kind: 'name',
+          index: nameHit.index,
+          el: nameHit.el,
+          startDist: distance(pts[0], pts[1]),
+          startCentroid: c,
+          startScale: nameHit.scale,
+          startCenter: center,
+          center,
+          scale: nameHit.scale,
         }
+        twoFingerUsed.current = true
+        return
       }
 
-      const hit = p.controllerRef.current?.bodyAt(local.x, local.y)
+      const hit = p.controllerRef.current?.bodyAt(c.x - vp.left, c.y - vp.top)
       if (hit) {
         p.controllerRef.current?.suspendDrag()
         gesture.current = {
@@ -95,11 +99,9 @@ export function useStageGestures(props: StageGestureProps): void {
     }
 
     const applyNameLive = (g: Extract<Gesture, { kind: 'name' }>) => {
-      const nameEl = propsRef.current.nameRef.current
-      if (!nameEl) return
-      nameEl.style.left = `${g.center.x}px`
-      nameEl.style.top = `${g.center.y}px`
-      nameEl.style.fontSize = `${propsRef.current.fontBasePx * g.scale}px`
+      g.el.style.left = `${g.center.x}px`
+      g.el.style.top = `${g.center.y}px`
+      g.el.style.fontSize = `${propsRef.current.fontBasePx * g.scale}px`
     }
 
     const onDown = (event: PointerEvent) => {
@@ -144,7 +146,7 @@ export function useStageGestures(props: StageGestureProps): void {
         p.onImageCommit(g.imageId, size)
       } else {
         const vp = viewport()
-        p.onNameCommit({ x: (g.center.x - vp.left) / vp.w, y: (g.center.y - vp.top) / vp.h }, g.scale)
+        p.onNameCommit(g.index, { x: (g.center.x - vp.left) / vp.w, y: (g.center.y - vp.top) / vp.h }, g.scale)
       }
       p.controllerRef.current?.resumeDrag()
       gesture.current = null

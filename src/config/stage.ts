@@ -13,7 +13,13 @@ export const STAGE = {
   nameScaleMax: 4,
 } as const
 
-/** default normalized name center for a top/bottom preset (before any custom drag) */
-export function defaultNameOffset(position: 'top' | 'bottom'): { x: number; y: number } {
-  return position === 'top' ? { x: 0.5, y: 0.13 } : { x: 0.5, y: 0.85 }
+/** default normalized center for a name line, stacking `count` visible lines at the top/bottom anchor */
+export function defaultLineOffset(
+  position: 'top' | 'bottom',
+  index: number,
+  count: number,
+): { x: number; y: number } {
+  const gap = 0.075
+  const start = position === 'top' ? 0.11 : 0.84 - (count - 1) * gap
+  return { x: 0.5, y: start + index * gap }
 }

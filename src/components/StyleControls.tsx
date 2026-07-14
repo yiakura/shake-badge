@@ -269,7 +269,8 @@ export function StyleControls() {
         value={style.fontSizePx}
         onChange={(fontSizePx) => {
           updateStyle({ fontSizePx })
-          updateSettings({ nameScale: 1 }) // editor slider is authoritative; drop any stage pinch scale
+          // editor slider is authoritative; drop any per-line stage pinch scale
+          updateSettings({ nameLayout: settings.nameLayout.map((line) => ({ offset: line.offset, scale: 1 })) })
         }}
         format={(v) => `${v} px`}
       />
@@ -389,13 +390,23 @@ export function StyleControls() {
             <div className="flex gap-2">
               <Chip
                 on={settings.namePosition === 'top'}
-                onClick={() => updateSettings({ namePosition: 'top', nameOffset: null })}
+                onClick={() =>
+                  updateSettings({
+                    namePosition: 'top',
+                    nameLayout: settings.nameLayout.map((line) => ({ offset: null, scale: line.scale })),
+                  })
+                }
               >
                 {t('position.top')}
               </Chip>
               <Chip
                 on={settings.namePosition === 'bottom'}
-                onClick={() => updateSettings({ namePosition: 'bottom', nameOffset: null })}
+                onClick={() =>
+                  updateSettings({
+                    namePosition: 'bottom',
+                    nameLayout: settings.nameLayout.map((line) => ({ offset: null, scale: line.scale })),
+                  })
+                }
               >
                 {t('position.bottom')}
               </Chip>
