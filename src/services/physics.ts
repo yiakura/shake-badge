@@ -173,19 +173,25 @@ async function bakeTexture(blob: Blob, spec: TextureSpec): Promise<BakedTexture>
       return { canvas, ...hullFromCanvas(ctx, px) }
     }
 
-    // opaque photo → sticker card: rounded picture with an optional colored frame
+    // opaque photo → sticker card. With a colored frame the photo is inset inside it;
+    // without one (transparent edge) the photo fills the whole tile so there is no dead
+    // margin — otherwise the picture bounces short of the wall and the gap grows on zoom.
     const outerRadius = px * 0.12
+    ctx.save()
+    ctx.beginPath()
     if (hasColorEdge) {
-      ctx.beginPath()
       roundedRectPath(ctx, 0, 0, px, outerRadius)
       ctx.fillStyle = outlineColor
       ctx.fill()
+      ctx.beginPath()
+      roundedRectPath(ctx, marginPx, marginPx, inner, outerRadius * 0.6)
+      ctx.clip()
+      ctx.drawImage(source, marginPx, marginPx, inner, inner)
+    } else {
+      roundedRectPath(ctx, 0, 0, px, outerRadius)
+      ctx.clip()
+      ctx.drawImage(source, 0, 0, px, px)
     }
-    ctx.save()
-    ctx.beginPath()
-    roundedRectPath(ctx, marginPx, marginPx, inner, outerRadius * 0.6)
-    ctx.clip()
-    ctx.drawImage(source, marginPx, marginPx, inner, inner)
     ctx.restore()
     releaseDecoded(source)
     return { canvas }
@@ -217,7 +223,9 @@ async function bakeTexture(blob: Blob, spec: TextureSpec): Promise<BakedTexture>
     ctx.strokeStyle = outlineColor
     ctx.stroke()
   }
-  return { canvas }
+  // transparent images collide by their visible content (alpha hull) so they reach the
+  // walls, instead of a padded circle/square whose empty margin bounces them short
+  return spec.hasAlpha ? { canvas, ...hullFromCanvas(ctx, px) } : { canvas }
 }
 
 function scatterPositions(count: number, width: number, height: number, maxDiameter: number): Vec2[] {
@@ -419,33 +427,25 @@ export class PhysicsController {
     ]
   }
 
-  /** hard safety net: clamp positions into the viewport and cap speed */
+  /** hard safety net: clamp each body's real bounding box into the viewport and cap speed.
+   *  Uses body.bounds (per-axis) rather than one radius so non-circular shapes (e.g. a tall
+   *  sticker) can reach the left/right walls instead of stopping a height-radius away. */
   private containBodies(): void {
     for (const body of this.bodies) {
-      const radius = this.radii.get(body.id) ?? this.maxDiameter / 2
-      let { x, y } = body.position
-      let { x: vx, y: vy } = body.velocity
-      let moved = false
-      if (x < radius) {
-        x = radius
-        vx = Math.abs(vx) * 0.5
-        moved = true
-      } else if (x > this.width - radius) {
-        x = this.width - radius
-        vx = -Math.abs(vx) * 0.5
-        moved = true
-      }
-      if (y < radius) {
-        y = radius
-        vy = Math.abs(vy) * 0.5
-        moved = true
-      } else if (y > this.height - radius) {
-        y = this.height - radius
-        vy = -Math.abs(vy) * 0.5
-        moved = true
-      }
-      if (moved) {
-        Matter.Body.setPosition(body, { x, y })
+      const b = body.bounds
+      let dx = 0
+      let dy = 0
+      if (b.min.x < 0) dx = -b.min.x
+      else if (b.max.x > this.width) dx = this.width - b.max.x
+      if (b.min.y < 0) dy = -b.min.y
+      else if (b.max.y > this.height) dy = this.height - b.max.y
+      if (dx !== 0 || dy !== 0) {
+        Matter.Body.setPosition(body, { x: body.position.x + dx, y: body.position.y + dy })
+        let { x: vx, y: vy } = body.velocity
+        if (dx > 0) vx = Math.abs(vx) * 0.5
+        else if (dx < 0) vx = -Math.abs(vx) * 0.5
+        if (dy > 0) vy = Math.abs(vy) * 0.5
+        else if (dy < 0) vy = -Math.abs(vy) * 0.5
         Matter.Body.setVelocity(body, { x: vx, y: vy })
       }
       const speed = Math.hypot(body.velocity.x, body.velocity.y)
