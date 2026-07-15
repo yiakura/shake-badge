@@ -41,6 +41,10 @@ export const PHYSICS = {
   maxAreaRatio: 0.57,
   /** render pixel-ratio cap (fill-rate / battery) */
   maxPixelRatio: 2,
+  /** extra sprite-texture resolution baked in so pinch-zoom stays sharp */
+  textureZoomHeadroom: 3.5,
+  /** hard cap on baked texture edge (px); matches the cropped source size (LIMITS.croppedEdge) */
+  maxTexturePx: 512,
   /** speed cap in px/frame so shakes stay lively but controllable */
   maxSpeed: 42,
 

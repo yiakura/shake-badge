@@ -294,11 +294,16 @@ export class PhysicsController {
 
     const baked = await Promise.all(
       sprites.map((sprite, index) => {
-        const texturePx = Math.max(2, Math.round(diameters[index] * pixelRatio))
+        // bake with zoom headroom so pinch-enlarging stays crisp (capped at the source
+        // resolution to bound memory); outline width is texture-relative to stay constant
+        const texturePx = Math.max(
+          2,
+          Math.min(PHYSICS.maxTexturePx, Math.round(diameters[index] * pixelRatio * PHYSICS.textureZoomHeadroom)),
+        )
         const useSource = sprite.shapeMode === 'source' && sprite.hasAlpha
         const outlinePx =
           options.outline.mode === 'color'
-            ? Math.max(2, Math.round(diameters[index] * PHYSICS.outlineWidthRatio * pixelRatio))
+            ? Math.max(2, Math.round(texturePx * PHYSICS.outlineWidthRatio))
             : 0
         return bakeTexture(sprite.blob, {
           mode: useSource ? 'source' : options.shape,
